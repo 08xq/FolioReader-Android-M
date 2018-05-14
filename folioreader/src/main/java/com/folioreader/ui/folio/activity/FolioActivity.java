@@ -1,18 +1,18 @@
 /*
-* Copyright (C) 2016 Pedro Paulo de Amorim
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-* http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Copyright (C) 2016 Pedro Paulo de Amorim
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.folioreader.ui.folio.activity;
 
 import android.Manifest;
@@ -26,6 +26,7 @@ import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.AppCompatImageView;
 import android.support.v7.widget.Toolbar;
 import android.text.Html;
 import android.text.TextUtils;
@@ -35,6 +36,7 @@ import android.view.animation.AccelerateInterpolator;
 import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
 import android.view.animation.DecelerateInterpolator;
+import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.RelativeLayout;
@@ -48,9 +50,11 @@ import com.folioreader.R;
 import com.folioreader.model.HighlightImpl;
 import com.folioreader.model.ReadPosition;
 import com.folioreader.model.event.AnchorIdEvent;
+import com.folioreader.model.event.ClearSearchEvent;
 import com.folioreader.model.event.MediaOverlayHighlightStyleEvent;
 import com.folioreader.model.event.MediaOverlayPlayPauseEvent;
 import com.folioreader.model.event.MediaOverlaySpeedEvent;
+import com.folioreader.model.event.SearchEvent;
 import com.folioreader.model.event.WebViewPosition;
 import com.folioreader.ui.folio.adapter.FolioPageFragmentAdapter;
 import com.folioreader.ui.folio.fragment.FolioPageFragment;
@@ -69,12 +73,14 @@ import org.readium.r2_streamer.model.container.Container;
 import org.readium.r2_streamer.model.container.EpubContainer;
 import org.readium.r2_streamer.model.publication.EpubPublication;
 import org.readium.r2_streamer.model.publication.link.Link;
+import org.readium.r2_streamer.model.searcher.SearchQueryResults;
 import org.readium.r2_streamer.server.EpubServer;
 import org.readium.r2_streamer.server.EpubServerSingleton;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static com.folioreader.Constants.CHAPTER_SELECTED;
 import static com.folioreader.Constants.HIGHLIGHT_SELECTED;
@@ -108,8 +114,17 @@ public class FolioActivity
     private static final String HIGHLIGHT_ITEM = "highlight_item";
 
     public boolean mIsActionBarVisible;
+    public boolean mIsSearchSectionVisible = false;
+    public boolean isForSearch = true;
     private DirectionalViewpager mFolioPageViewPager;
     private Toolbar mToolbar;
+    private RelativeLayout searchSection;
+    private AppCompatImageView searchImage;
+    private SearchImageClickListener searchImageClickListener;
+    private EditText mSearchText;
+
+    private static final int SEARCH_ICON = 1;
+    private static final int DOWN_ARROW_ICON = 2;
 
     private int mChapterPosition;
     private FolioPageFragmentAdapter mFolioPageFragmentAdapter;
@@ -167,6 +182,18 @@ public class FolioActivity
         initAudioView();
         mToolbar = (Toolbar) findViewById(R.id.toolbar);
 
+        ///////////////////search inits /////////////////////
+
+        searchSection = (RelativeLayout) findViewById(R.id.search_section);
+        searchImage = (AppCompatImageView) findViewById(R.id.search_img);
+        searchImage.setTag(SEARCH_ICON);
+        mSearchText = (EditText) findViewById(R.id.search_query);
+        searchImageClickListener = new SearchImageClickListener();
+        searchImage.setOnClickListener(searchImageClickListener);
+        searchAnimateHide();
+
+        ///////////////////search inits /////////////////////
+
         findViewById(R.id.btn_drawer).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -193,6 +220,24 @@ public class FolioActivity
                     shade.setVisibility(View.GONE);
                 }
                 isOpen = !isOpen;
+            }
+        });
+
+        // search
+        findViewById(R.id.btn_search).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                search();
+            }
+        });
+
+        //cancel search
+        findViewById(R.id.cancel_img).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                clearSearchSection();
+                clearSearchHighlights();
+                isForSearch = true;
             }
         });
 
@@ -293,6 +338,7 @@ public class FolioActivity
      * 1. id
      * 2. href
      * 3. index
+     *
      * @param readPosition Last read position
      * @return index of the chapter
      */
@@ -394,6 +440,7 @@ public class FolioActivity
     private void toolbarAnimateShow() {
         if (!mIsActionBarVisible) {
             mToolbar.animate().translationY(0).setInterpolator(new DecelerateInterpolator(2)).start();
+            searchSection.animate().translationY(0).setInterpolator(new DecelerateInterpolator(2)).start();
             mIsActionBarVisible = true;
         }
     }
@@ -401,6 +448,8 @@ public class FolioActivity
     private void toolbarAnimateHide() {
         mIsActionBarVisible = false;
         mToolbar.animate().translationY(-mToolbar.getHeight()).setInterpolator(new AccelerateInterpolator(2)).start();
+        searchSection.animate().translationY(-mToolbar.getHeight()).setInterpolator(new AccelerateInterpolator(2))
+                                .start();
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
@@ -439,6 +488,18 @@ public class FolioActivity
             }
         }
     }
+
+        @Override
+    public void onShowSearchResults(SearchQueryResults results) {
+
+                       isForSearch = false;
+                String query = results.getSearchResultList().get(0).getSearchQuery();
+                searchImageClickListener.clearIndexes();
+                searchImageClickListener.query = query;
+                searchImageClickListener.indexes = getSearchIndexes(results);
+                changeSearchIcon(false);
+
+                    }
 
     @Override
     protected void onDestroy() {
@@ -676,6 +737,159 @@ public class FolioActivity
                     finish();
                 }
                 break;
+        }
+    }
+
+    /////////////////////////////////////////////SEARCH SECTION////////////////////////////////////////////////////////
+
+    private ArrayList getSearchIndexes(SearchQueryResults results) {
+        ArrayList<Integer> searchQueryIndexes = new ArrayList<>();
+        for (int i = 0; i < results.getSearchResultList().size(); i++) {
+            for (int j = 0; j < mSpineReferenceList.size(); j++) {
+                if (mSpineReferenceList.get(j).getHref().equalsIgnoreCase(results.getSearchResultList().get(i)
+                        .getResource())) {
+                    searchQueryIndexes.add(j);
+                    break;
+                }
+            }
+        }
+        return searchQueryIndexes;
+    }
+
+    @Override
+    public String getSearchQuery() {
+        if (mSearchText.getText() == null) {
+            return null;
+        } else {
+            String searchQuery = mSearchText.getText().toString();
+            if (!searchQuery.isEmpty()) {
+                if (searchQuery.contains(" ")) {
+                    searchQuery = searchQuery.replaceAll(" ", "%20");
+                }
+                if (searchQuery.length() != 0) {
+                    return Constants.LOCALHOST + bookFileName + "/search?query=" + searchQuery;
+                } else {
+                    return null;
+                }
+            } else {
+                return null;
+            }
+        }
+    }
+
+
+    private void clearSearchSection() {
+        if (mSearchText != null)
+            mSearchText.getText().clear();
+        changeSearchIcon(true);
+
+    }
+
+    private void changeSearchIcon(boolean doSearch) {
+        if (doSearch/* && (int)searchImage.getTag()== DOWN_ARROW_ICON*/) {
+            searchImage.setTag(SEARCH_ICON);
+            searchImage.setImageResource(R.drawable.ic_search_white_24px);
+            findViewById(R.id.cancel_img).setVisibility(View.GONE);
+            searchSection.invalidate();
+        } else /* if (!doSearch && (int)searchImage.getTag()== SEARCH_ICON)*/ {
+            searchImage.setTag(DOWN_ARROW_ICON);
+            searchImage.setImageResource(R.drawable.ic_keyboard_arrow_down_white_24);
+            findViewById(R.id.cancel_img).setVisibility(View.VISIBLE);
+            searchSection.invalidate();
+        }
+    }
+
+    private void clearSearchHighlights() {
+        EventBus.getDefault().post(new ClearSearchEvent());
+    }
+
+    private void search() {
+        isForSearch = true;
+        if (!mIsSearchSectionVisible) {
+            searchAnimateShow();
+            clearSearchSection();
+        } else {
+            searchAnimateHide();
+            clearSearchHighlights();
+        }
+    }
+
+    private void searchAnimateShow() {
+        if (!mIsSearchSectionVisible) {
+            mIsSearchSectionVisible = true;
+            searchSection.setVisibility(View.VISIBLE);
+            toolbarAnimateHide();
+        }
+    }
+
+    private void searchAnimateHide() {
+        mIsSearchSectionVisible = false;
+        searchSection.setVisibility(View.GONE);
+    }
+
+    class SearchImageClickListener implements View.OnClickListener {
+
+        public ArrayList<Integer> indexes;
+        private int currentIndex = 0, oldIndex = 0;
+        private int count = 0;
+        public String query, uniqueID;
+        private int fragmentPos;
+        private boolean onEndPos = false;
+
+        @Override
+        public void onClick(View view) {
+            // TODO: 22.04.2018 close keyboard if open
+            if (isForSearch) {
+                new MainPresenter(FolioActivity.this).searchQuery();
+            } else {
+                if (indexes != null && query != null) {
+                    if (indexes.size() > currentIndex) {
+                        boolean isNew = true;
+                        if (currentIndex > 0 && (int) indexes.get(currentIndex - 1) == ((int) indexes.get
+                                (currentIndex))) {
+                            isNew = false;
+                            count++;
+                        } else {
+                            changeCurrentIndex();
+                            uniqueID = UUID.randomUUID().toString();
+                            count = 0;
+                            mChapterPosition = indexes.get(currentIndex);
+                            mFolioPageViewPager.setCurrentItem(mChapterPosition);
+                        }
+                        oldIndex = currentIndex;
+                        EventBus.getDefault().post(new SearchEvent(query, isNew, count, uniqueID));
+                        currentIndex++;
+                        onEndPos = false;
+                    } else {
+                        // TODO: 21.04.2018 change icon & no restart since it may leak
+                        onEndPos = true;
+                        currentIndex = 0;
+                        oldIndex = 0;
+                        view.performClick();
+                    }
+                }
+            }
+        }
+
+        public void clearIndexes() {
+            currentIndex = 0;
+            oldIndex = 0;
+            count = 0;
+            onEndPos = false;
+        }
+
+        private void changeCurrentIndex() {
+            fragmentPos = mFolioPageViewPager.getCurrentItem();
+            if (indexes != null) {
+                if (fragmentPos != indexes.get(oldIndex)) {
+                    for (int i = 0; i < indexes.size(); i++) {
+                        if (indexes.get(i) == fragmentPos && !onEndPos) {
+                            currentIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 }
