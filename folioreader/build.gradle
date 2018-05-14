@@ -12,8 +12,8 @@ ext {
 
     libraryDescription = 'An epub reader for Android'
 
-    siteUrl = 'https://github.com/FolioReader/FolioReader-Android'
-    gitUrl = 'https://github.com/FolioReader/FolioReader-Android.git'
+    siteUrl = 'https://github.com/MobilionOSS/FolioReader-Android-M'
+    gitUrl = 'https://github.com/MobilionOSS/FolioReader-Android-M.git'
 
     libraryVersion = '0.3.8.1'
 
